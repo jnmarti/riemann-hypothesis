@@ -189,7 +189,7 @@ def validated_blobs(record, identity, fetcher=fetch):
         raise ValueError("unsupported or empty CI Lake map")
     entries = {}
     for line in lines[1:]:
-        row = decode(line)
+        row = json.loads(line)
         if (not isinstance(row, list) or len(row) != 2 or not all(isinstance(x, str) for x in row)
                 or not HASH.fullmatch(row[0]) or not ARTIFACT.fullmatch(row[1]) or row[0] in entries):
             raise ValueError("invalid or duplicate CI map entry")
@@ -206,18 +206,11 @@ def validated_blobs(record, identity, fetcher=fetch):
             or header.get("map_sha256") != record["map_sha256"]
             or type(header.get("modules")) is not int or header["modules"] != len(entries)):
         raise ValueError("CI module manifest is not bound to the current inputs and immutable map")
-    # Only these two metadata globals change. The initial archive's configuration
-    # allowlist/check_project stay intact; this path has its own exact Git/file binding.
-    restore.HEADER = header
-    restore.MANIFEST_SHA256 = record["module_manifest_sha256"]
-    module_rows = restore.manifest_rows(manifest)
-    inputs = set()
-    for name, input_hash, artifact, sha256 in module_rows:
-        if input_hash in inputs or entries.get(input_hash) != artifact:
+    module_rows = restore.parse_manifest_rows(rows[1:], header["modules"])
+    # The row counts agree. Each row must consume a distinct matching map entry.
+    for _, input_hash, artifact, _ in module_rows:
+        if entries.pop(input_hash, None) != artifact:
             raise ValueError("CI module manifest does not uniquely cover its immutable map")
-        inputs.add(input_hash)
-    if inputs != set(entries):
-        raise ValueError("CI module manifest does not completely cover its immutable map")
     return contents, module_rows
 
 

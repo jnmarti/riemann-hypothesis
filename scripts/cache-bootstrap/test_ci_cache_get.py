@@ -107,7 +107,11 @@ revisionEndpoint = "https://example.invalid/revisions"
         for path in stale:
             path.parent.mkdir(parents=True, exist_ok=True)
             path.write_text("0" * 16)
+        pinned_header = client.restore.HEADER.copy()
+        pinned_digest = client.restore.MANIFEST_SHA256
         client.consume(root, cache, selected, identity, workers=2, fetcher=fetch)
+        assert client.restore.HEADER == pinned_header
+        assert client.restore.MANIFEST_SHA256 == pinned_digest
         assert not any(path.exists() for path in stale)
         for ext, data in originals.items():
             assert (ir if ext == "c" else lib).joinpath("Subject." + ext).read_bytes() == data
@@ -152,6 +156,19 @@ revisionEndpoint = "https://example.invalid/revisions"
                "module_manifest_key": f"ci/module-manifests/{client.digest(bad_manifest)}.jsonl.gz"}
         objects[bad["module_manifest_key"]] = bad_manifest
         rejects(lambda: client.validated_blobs(bad, identity, fetch))
+
+        other_input = f"{int(input_hash, 16) ^ 1:016x}"
+        two_entries = mapping + client.canonical([other_input, artifact]) + b"\n"
+        two_header = {**header, "map_sha256": client.digest(two_entries), "modules": 2}
+        duplicate_rows = [row, ["Other", *row[1:]]]
+        duplicate_manifest = gzip.compress(
+            b"\n".join(map(client.canonical, [two_header, *duplicate_rows])) + b"\n", mtime=0)
+        duplicate_input = {**record, "map_sha256": client.digest(two_entries),
+                           "module_manifest_sha256": client.digest(duplicate_manifest),
+                           "module_manifest_bytes": len(duplicate_manifest)}
+        bad_objects = {record["map_key"]: two_entries, record["module_manifest_key"]: duplicate_manifest}
+        rejects(lambda: client.validated_blobs(duplicate_input, identity, lambda key, _: bad_objects[key]))
+
         source = root / "src/Subject.lean"
         original = source.read_bytes()
         source.write_bytes(original + b"--dirty\n")

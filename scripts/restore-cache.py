@@ -50,11 +50,17 @@ def manifest_rows(contents):
     lines = gzip.decompress(contents).splitlines()
     if not lines or json.loads(lines[0]) != HEADER:
         raise ValueError("bootstrap manifest metadata mismatch")
-    rows = [json.loads(line) for line in lines[1:]]
-    if len(rows) != HEADER["modules"]:
+    return parse_manifest_rows(lines[1:], HEADER["modules"])
+
+
+def parse_manifest_rows(lines, expected_count):
+    """Validate module rows after the caller has checked the manifest header."""
+    if len(lines) != expected_count:
         raise ValueError("incomplete bootstrap manifest")
+    rows = []
     seen = set()
-    for row in rows:
+    for line in lines:
+        row = json.loads(line)
         if not isinstance(row, list) or len(row) != 4 or not all(isinstance(x, str) for x in row):
             raise ValueError("invalid bootstrap module record")
         name, dep_hash, artifact, digest = row
@@ -63,6 +69,7 @@ def manifest_rows(contents):
                 not SHA256.fullmatch(digest) or name in seen):
             raise ValueError("invalid or duplicate bootstrap module")
         seen.add(name)
+        rows.append(row)
     return rows
 
 
